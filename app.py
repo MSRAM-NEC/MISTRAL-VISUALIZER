@@ -68,28 +68,32 @@ with st.sidebar:
     csv_path = st.text_input("CSV File Path", value="moving_objects.csv", disabled=not csv_log)
 
     col1, col2 = st.columns(2)
+    # mainapp.py (excerpt inside sidebar controls)
+
     if col1.button("Start Collector", disabled=st.session_state.is_running, type="primary"):
         try:
-            sc = SerialCollector(data_port=data_com_port, data_baud=data_baud,
-                                 config_port=config_com_port, config_baud=config_baud)
+            # --- Step 1: Send config BEFORE starting collector ---
+            # Step 1: Send config first
+            success = send_mmwave_config("mmwave_config.cfg", config_port=config_com_port, config_baud=config_baud)
+            if not success:
+                st.error("⚠️ Failed to send config file to radar.")
+                st.stop()
+
+            # Step 2: If config and data ports are the same, switch to data baud
+            if data_com_port == config_com_port:
+                log(f"Same port used for config & data ({data_com_port}). Switching baud to {data_baud} for data stream.")
+                sc = SerialCollector(data_port=data_com_port, data_baud=data_baud)
+            else:
+                sc = SerialCollector(data_port=data_com_port, data_baud=data_baud)
+
             sc.start()
-            # Send config file
-            ok = send_mmwave_config(config_file_path, config_port=config_com_port, config_baud=config_baud)
-            if not ok:
-                raise SerialReadError("Failed to send config file")
+
 
             st.session_state.collector = sc
             st.session_state.is_running = True
-            log(f"Collector started. Data on {data_com_port} @ {data_baud}, Config on {config_com_port} @ {config_baud}")
+            log(f"Collector started. Data on {data_com_port} @ {data_baud}, config sent via {config_com_port} @ {config_baud}")
             st.rerun()
-        except SerialReadError as e:
-            st.error(f"Error: {e}")
-            log(f"Start failed: {e}")
-            if st.session_state.collector:
-                st.session_state.collector.stop()
-                st.session_state.collector = None
-            st.session_state.is_running = False
-            st.rerun()
+
         except Exception as e:
             st.error(f"Unexpected error: {e}")
             log(f"Unexpected error during start: {e}")
@@ -98,6 +102,7 @@ with st.sidebar:
                 st.session_state.collector = None
             st.session_state.is_running = False
             st.rerun()
+
 
     if col2.button("Stop Collector", disabled=not st.session_state.is_running):
         if st.session_state.collector:
