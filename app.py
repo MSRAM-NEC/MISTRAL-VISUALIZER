@@ -63,23 +63,24 @@ with st.sidebar:
     view_mode = st.radio("Plot Projection", ["3D Scatter", "X vs Y", "Y vs Z", "Z vs X"])
     point_size = st.slider("Point Size", 2, 30, 8)
 
+    # Fixed axis ranges for radar plotting
+    st.subheader("Radar Axis Ranges")
+    x_min, x_max = st.slider("X Range (left-right)", -10.0, 10.0, (-5.0, 5.0))
+    y_min, y_max = st.slider("Y Range (forward distance)", 0.0, 20.0, (0.0, 10.0))
+    z_min, z_max = st.slider("Z Range (height)", -5.0, 5.0, (-2.0, 2.0))
+
     st.header("CSV Logging")
     csv_log = st.checkbox("Log new points to CSV", value=False)
     csv_path = st.text_input("CSV File Path", value="moving_objects.csv", disabled=not csv_log)
 
     col1, col2 = st.columns(2)
-    # mainapp.py (excerpt inside sidebar controls)
-
     if col1.button("Start Collector", disabled=st.session_state.is_running, type="primary"):
         try:
-            # --- Step 1: Send config BEFORE starting collector ---
-            # Step 1: Send config first
             success = send_mmwave_config("mmwave_config.cfg", config_port=config_com_port, config_baud=config_baud)
             if not success:
                 st.error("⚠️ Failed to send config file to radar.")
                 st.stop()
 
-            # Step 2: If config and data ports are the same, switch to data baud
             if data_com_port == config_com_port:
                 log(f"Same port used for config & data ({data_com_port}). Switching baud to {data_baud} for data stream.")
                 sc = SerialCollector(data_port=data_com_port, data_baud=data_baud)
@@ -87,7 +88,6 @@ with st.sidebar:
                 sc = SerialCollector(data_port=data_com_port, data_baud=data_baud)
 
             sc.start()
-
 
             st.session_state.collector = sc
             st.session_state.is_running = True
@@ -102,7 +102,6 @@ with st.sidebar:
                 st.session_state.collector = None
             st.session_state.is_running = False
             st.rerun()
-
 
     if col2.button("Stop Collector", disabled=not st.session_state.is_running):
         if st.session_state.collector:
@@ -164,24 +163,48 @@ with left_col:
         plot_area.info("Start the collector to see live data.")
     else:
         color_map = {'Moving': '#FF4B4B', 'Static': '#B0B8C8'}
-        
+
         if view_mode == "3D Scatter":
-            fig = px.scatter_3d(df_to_plot, x="x", y="y", z="z",
-                                color='state',
-                                color_discrete_map=color_map,
-                                hover_data=["velocity", "rng", "timestamp"])
-            fig.update_scenes(aspectmode='data')
+            fig = px.scatter_3d(
+                df_to_plot, x="x", y="y", z="z",
+                color="state",
+                color_discrete_map=color_map,
+                hover_data=["velocity", "rng", "timestamp"]
+            )
+            fig.update_scenes(
+                xaxis=dict(range=[x_min, x_max], autorange=False, title="X (m)"),
+                yaxis=dict(range=[y_min, y_max], autorange=False, title="Y (m)"),
+                zaxis=dict(range=[z_min, z_max], autorange=False, title="Z (m)"),
+                aspectmode="cube"
+            )
         else:
             xcol, ycol = ("x", "y") if view_mode == "X vs Y" else \
                          ("y", "z") if view_mode == "Y vs Z" else ("z", "x")
-            fig = px.scatter(df_to_plot, x=xcol, y=ycol,
-                             color='state',
-                             color_discrete_map=color_map,
-                             hover_data=["velocity", "rng", "timestamp"])
-            fig.update_yaxes(scaleanchor="x", scaleratio=1)
+            fig = px.scatter(
+                df_to_plot, x=xcol, y=ycol,
+                color="state",
+                color_discrete_map=color_map,
+                hover_data=["velocity", "rng", "timestamp"]
+            )
 
-        fig.update_layout(margin=dict(l=0, r=0, t=25, b=0),
-                          height=700, legend_title_text='Object State')
+            if (xcol, ycol) == ("x", "y"):
+                fig.update_xaxes(range=[x_min, x_max], autorange=False, title="X (m)")
+                fig.update_yaxes(range=[y_min, y_max], autorange=False, title="Y (m)",
+                                 scaleanchor="x", scaleratio=1)
+            elif (xcol, ycol) == ("y", "z"):
+                fig.update_xaxes(range=[y_min, y_max], autorange=False, title="Y (m)")
+                fig.update_yaxes(range=[z_min, z_max], autorange=False, title="Z (m)",
+                                 scaleanchor="x", scaleratio=1)
+            else:  # (z, x)
+                fig.update_xaxes(range=[z_min, z_max], autorange=False, title="Z (m)")
+                fig.update_yaxes(range=[x_min, x_max], autorange=False, title="X (m)",
+                                 scaleanchor="x", scaleratio=1)
+
+        fig.update_layout(
+            margin=dict(l=0, r=0, t=25, b=0),
+            height=700,
+            legend_title_text="Object State"
+        )
         fig.update_traces(marker=dict(size=point_size))
         
         plot_area.plotly_chart(fig, use_container_width=True)
@@ -189,7 +212,8 @@ with left_col:
     with st.expander("Show Latest Data Table"):
         st.dataframe(df_to_plot.tail(200))
 
-# --- AUTO-REFRESH LOOP ---
+# ----- AUTO-REFRESH LOOP -----
 if st.session_state.is_running:
     time.sleep(poll_interval)
     st.rerun()
+# -------- END OF APP ---------
